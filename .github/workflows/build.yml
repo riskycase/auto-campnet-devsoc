@@ -35,7 +35,6 @@ jobs:
         run: npm ci
 
       - name: Build the app
-        id: build
         uses: tauri-apps/tauri-action@v0
 
         env:
@@ -47,5 +46,5 @@ jobs:
         uses: actions/upload-artifact@v3
         with:
           name: tauri-build-${{ github.sha }}
-          path: ${{ steps.build.outputs.artifactPaths }}
+          path: ${{ github.workspace }}/src-tauri/target/release/bundle/(deb|appimage|dmg|macos|msi)/*
           retention-days: 7

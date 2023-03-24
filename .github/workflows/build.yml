@@ -51,6 +51,6 @@ jobs:
       - name: Upload build artifacts
         uses: actions/upload-artifact@v3
         with:
-          name: tauri-build-${{ github.sha }}
+          name: tauri-build-${{ runner.os }-${{ github.sha }}
           path: ${{ github.workspace }}/src-tauri/target/release/bundle/**/[Aa]uto*
           retention-days: 7

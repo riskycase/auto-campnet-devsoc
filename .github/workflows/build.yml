@@ -18,6 +18,7 @@ jobs:
         uses: actions/setup-node@v3
         with:
           node-version: 18
+          cache: npm
 
       - name: Rust setup
         uses: dtolnay/rust-toolchain@stable
@@ -45,8 +46,6 @@ jobs:
 
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          includeDebug: true
         
       - name: Upload build artifacts
         uses: actions/upload-artifact@v3

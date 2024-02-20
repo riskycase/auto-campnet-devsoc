@@ -1,5 +1,5 @@
 use super::data_types::Credentials;
-use crate::AppState;
+use crate::UserState;
 use reqwest::{
     blocking::{Client, Response},
     Error,
@@ -47,19 +47,19 @@ pub fn logout(creds: Credentials, login_endpoint: String) -> Result<Response, Er
 
 #[tauri::command]
 pub fn credential_check(username: String, password: String, app: AppHandle) -> Result<(), String> {
-    let app_state = app.state::<Arc<Mutex<AppState>>>();
+    let user_state = app.state::<Arc<Mutex<UserState>>>();
     if logout(
         Credentials {
             username: username.to_owned(),
             password: password.to_owned(),
         },
-        app_state.lock().unwrap().login_endpoint.to_owned(),
+        user_state.lock().unwrap().login_endpoint.to_owned(),
     )
     .is_ok()
     {
         let res = login(
             Credentials { username, password },
-            app_state.lock().unwrap().login_endpoint.to_string(),
+            user_state.lock().unwrap().login_endpoint.to_string(),
         );
         if res.is_ok() {
             let res_body: String = res.unwrap().text().unwrap();

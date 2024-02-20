@@ -1,13 +1,14 @@
 use super::data_types::{NotificationState, TrafficStats, TrafficUnits};
-use crate::AppState;
+use crate::{state::data_types::RunningState, TrafficState, UserState};
 use regex::Regex;
 use std::sync::{Arc, Mutex};
 use tauri::{api::notification::Notification, Manager};
 
 fn get_cookie(app: tauri::AppHandle) -> Result<(), reqwest::Error> {
     let client = reqwest::blocking::Client::new();
-    let app_state = app.state::<Arc<Mutex<AppState>>>();
-    let credentials = app_state.lock().unwrap().credentials.clone();
+    let user_state = app.state::<Arc<Mutex<UserState>>>();
+    let traffic_state = app.state::<Arc<Mutex<TrafficState>>>();
+    let credentials = user_state.lock().unwrap().credentials.clone();
     let body: String = format!(
         "mode=451&json=%7B%22username%22%3A%22{}%22%2C%22password%22%3A%22{}%22%2C%22languageid%22%3A%221%22%2C%22browser%22%3A%22Chrome_109%22%7D&t={}",
         credentials.username,
@@ -18,12 +19,12 @@ fn get_cookie(app: tauri::AppHandle) -> Result<(), reqwest::Error> {
             .as_millis()
     );
     let response = client
-        .post(app_state.lock().unwrap().portal_endpoint.to_owned() + "/userportal/Controller")
+        .post(traffic_state.lock().unwrap().portal_endpoint.to_owned() + "/userportal/Controller")
         .header("Content-Type", "application/x-www-form-urlencoded")
         .body(body)
         .send();
     if response.is_ok() {
-        app_state.lock().unwrap().cookie = response
+        traffic_state.lock().unwrap().cookie = response
             .unwrap()
             .headers()
             .get(reqwest::header::SET_COOKIE)
@@ -43,11 +44,11 @@ fn get_cookie(app: tauri::AppHandle) -> Result<(), reqwest::Error> {
 
 fn get_csrf(app: tauri::AppHandle) -> Result<(), ()> {
     let client = reqwest::blocking::Client::new();
-    let app_state = app.state::<Arc<Mutex<AppState>>>();
-    let cookie = app_state.lock().unwrap().cookie.to_string();
+    let traffic_state = app.state::<Arc<Mutex<TrafficState>>>();
+    let cookie = traffic_state.lock().unwrap().cookie.to_string();
     let response = client
         .get(
-            app_state.lock().unwrap().portal_endpoint.to_string()
+            traffic_state.lock().unwrap().portal_endpoint.to_string()
                 + "/userportal/webpages/myaccount/index.jsp",
         )
         .header(reqwest::header::COOKIE, cookie.to_string())
@@ -61,7 +62,7 @@ fn get_csrf(app: tauri::AppHandle) -> Result<(), ()> {
         let body = response.unwrap().text().unwrap();
         let matches = regex.captures(body.as_str());
         if matches.is_some() {
-            app_state.lock().unwrap().csrf = matches
+            traffic_state.lock().unwrap().csrf = matches
                 .unwrap()
                 .get(0)
                 .unwrap()
@@ -82,20 +83,21 @@ fn get_csrf(app: tauri::AppHandle) -> Result<(), ()> {
 
 pub fn get_remaining_data(app: tauri::AppHandle, initial_run: bool) {
     if !initial_run {
-        let app_state = app.state::<Arc<Mutex<AppState>>>();
-        app_state.lock().unwrap().traffic_guard = Option::None;
+        let running_state = app.state::<Arc<Mutex<RunningState>>>();
+        let traffic_state = app.state::<Arc<Mutex<TrafficState>>>();
+        running_state.lock().unwrap().traffic_guard = Option::None;
         let client = reqwest::blocking::Client::new();
         let campnet_status = client
-            .head(app_state.lock().unwrap().login_endpoint.to_owned())
+            .head(traffic_state.lock().unwrap().portal_endpoint.to_owned())
             .send();
         if campnet_status.is_ok() {
             let cookie_result = get_cookie(app.app_handle());
             if cookie_result.is_ok() {
                 let csrf_result = get_csrf(app.app_handle());
                 if csrf_result.is_ok() {
-                    let cookie = app_state.lock().unwrap().cookie.to_string();
-                    let csrf = app_state.lock().unwrap().csrf.to_string();
-                    let portal_endpoint = app_state.lock().unwrap().portal_endpoint.to_string();
+                    let cookie = traffic_state.lock().unwrap().cookie.to_string();
+                    let csrf = traffic_state.lock().unwrap().csrf.to_string();
+                    let portal_endpoint = traffic_state.lock().unwrap().portal_endpoint.to_string();
                     let data_result = client
                         .get(
                             portal_endpoint.to_string()
@@ -180,7 +182,7 @@ pub fn get_remaining_data(app: tauri::AppHandle, initial_run: bool) {
                             used: data_vector[9],
                             remaining: data_vector[10],
                         };
-                        app_state.lock().unwrap().traffic = traffic.clone();
+                        traffic_state.lock().unwrap().traffic = traffic.clone();
                         let data_usage = traffic.used / traffic.total;
                         let current_notification_state = if data_usage < 0.5 {
                             NotificationState::None
@@ -198,8 +200,8 @@ pub fn get_remaining_data(app: tauri::AppHandle, initial_run: bool) {
                             used: unit_vector[9].to_string(),
                             remaining: unit_vector[10].to_string(),
                         };
-                        app_state.lock().unwrap().traffic_units = traffic_units.clone();
-                        if app_state.lock().unwrap().last_notification_state
+                        traffic_state.lock().unwrap().traffic_units = traffic_units.clone();
+                        if traffic_state.lock().unwrap().last_notification_state
                             != current_notification_state
                         {
                             if current_notification_state == NotificationState::Used50 {
@@ -215,7 +217,7 @@ pub fn get_remaining_data(app: tauri::AppHandle, initial_run: bool) {
                                     .show()
                                     .unwrap();
                             }
-                            app_state.lock().unwrap().last_notification_state =
+                            traffic_state.lock().unwrap().last_notification_state =
                                 current_notification_state
                         }
                         app.get_window("main")
@@ -236,17 +238,17 @@ pub fn get_remaining_data(app: tauri::AppHandle, initial_run: bool) {
             callback_timer.schedule_with_delay(chrono::Duration::seconds(45), move || {
                 get_remaining_data(app_handle_next.app_handle(), false);
             });
-        app_state.lock().unwrap().traffic_guard = Option::Some(callback_gaurd.to_owned());
+        running_state.lock().unwrap().traffic_guard = Option::Some(callback_gaurd.to_owned());
         std::thread::sleep(std::time::Duration::from_secs(55));
     } else {
         let app_handle_next = app.app_handle();
-        let app_state = app.state::<Arc<Mutex<AppState>>>();
+        let running_state = app.state::<Arc<Mutex<RunningState>>>();
         let callback_timer = timer::Timer::new();
         let callback_gaurd =
             callback_timer.schedule_with_delay(chrono::Duration::zero(), move || {
                 get_remaining_data(app_handle_next.app_handle(), false);
             });
-        app_state.lock().unwrap().traffic_guard = Option::Some(callback_gaurd.to_owned());
+        running_state.lock().unwrap().traffic_guard = Option::Some(callback_gaurd.to_owned());
         std::thread::sleep(std::time::Duration::from_secs(1));
     }
 }

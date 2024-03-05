@@ -5,7 +5,6 @@
 )]
 
 use auto_launch::{AutoLaunch, AutoLaunchBuilder, Error};
-use networking::credentials::CredentialManager;
 use std::env::current_exe;
 use std::sync::{Arc, Mutex};
 use tauri::{api::notification::Notification, Manager};
@@ -14,6 +13,7 @@ extern crate timer;
 
 mod networking;
 mod state;
+mod utils;
 
 use networking::data_types::{Credentials, NotificationState, TrafficStats, TrafficUnits};
 use state::data_types::{RunningState, TrafficState, UserState};
@@ -158,16 +158,6 @@ fn connect_campnet(app: tauri::AppHandle, initial_run: bool) {
     }
 }
 
-fn auto_launch_check(app: tauri::AppHandle) {
-    let window: tauri::Window = app.get_window("main").unwrap();
-    window
-        .emit(
-            "autolaunch",
-            app.state::<AutoLaunchManager>().is_enabled().unwrap(),
-        )
-        .unwrap();
-}
-
 fn main() {
     let tray_menu = tauri::SystemTrayMenu::new()
         .add_item(tauri::CustomMenuItem::new("show", "Show window"))
@@ -180,44 +170,19 @@ fn main() {
     let system_tray = tauri::SystemTray::new().with_menu(tray_menu);
     tauri::Builder::default()
         .setup(|app: &mut tauri::App| {
-            let credential_manager = CredentialManager::new(app.app_handle());
-            app.manage(Arc::new(Mutex::new(TrafficState {
-                portal_endpoint: "https://campnet.bits-goa.ac.in:4443".to_string(),
-                cookie: "".to_string(),
-                csrf: "".to_string(),
-                traffic: TrafficStats {
-                    total: 0.0,
-                    last: 0.0,
-                    current: 0.0,
-                    used: 0.0,
-                    remaining: 0.0,
-                },
-                traffic_units: TrafficUnits {
-                    total: "".to_string(),
-                    last: "".to_string(),
-                    current: "".to_string(),
-                    used: "".to_string(),
-                    remaining: "".to_string(),
-                },
-                last_notification_state: NotificationState::None,
-            })));
-            app.manage(Arc::new(Mutex::new(UserState {
-                credential_manager: credential_manager.to_owned(),
-                login_endpoint: "https://campnet.bits-goa.ac.in:8090".to_string(),
-                credentials: Credentials {
-                    username: "".to_string(),
-                    password: "".to_string(),
-                },
-            })));
-            app.manage(Arc::new(Mutex::new(RunningState {
-                login_guard: Option::None,
-                traffic_guard: Option::None,
-            })));
-            let creds = credential_manager.load();
+            app.manage(Arc::new(Mutex::new(TrafficState::default("https://campnet.bits-goa.ac.in:4443".to_string()))));
+            app.manage(Arc::new(Mutex::new(UserState::default(
+                app.app_handle(),
+                "https://campnet.bits-goa.ac.in:8090".to_string(),
+            ))));
+            app.manage(Arc::new(Mutex::new(RunningState::default())));
+            let user_state = app.state::<Arc<Mutex<UserState>>>();
+            let creds = user_state.lock().unwrap().credential_manager.load();
             let app_handle_save = app.app_handle();
             app.listen_global("save", move |event: tauri::Event| {
+                let user_state = app_handle_save.state::<Arc<Mutex<UserState>>>();
                 let creds: Credentials = serde_json::from_str(event.payload().unwrap()).unwrap();
-                credential_manager.save(creds);
+                user_state.lock().unwrap().credential_manager.save(creds);
                 let app_handle_thread = app_handle_save.app_handle();
                 std::thread::spawn(move || {
                     connect_campnet(app_handle_thread.app_handle(), false);
@@ -287,7 +252,17 @@ fn main() {
                             .disable()
                             .unwrap();
                     }
-                    auto_launch_check(app_handle_launch.app_handle());
+                    app_handle_launch
+                        .get_window("main")
+                        .unwrap()
+                        .emit(
+                            "autolaunch",
+                            app_handle_launch
+                                .state::<AutoLaunchManager>()
+                                .is_enabled()
+                                .unwrap(),
+                        )
+                        .unwrap();
                 });
             let user_state = app.state::<Arc<Mutex<UserState>>>();
             let traffic_state = app.state::<Arc<Mutex<TrafficState>>>();
@@ -300,8 +275,7 @@ fn main() {
                 connect_campnet(app.app_handle(), true);
                 networking::traffic::get_remaining_data(app.app_handle(), true);
             } else {
-                app.get_window("main").unwrap().show().unwrap();
-                auto_launch_check(app.app_handle());
+                utils::show_window(app.app_handle());
             }
             Ok(())
         })
@@ -312,46 +286,11 @@ fn main() {
                     std::process::exit(0);
                 }
                 "show" => {
-                    auto_launch_check(app.app_handle());
-                    let window: tauri::Window = app.get_window("main").unwrap();
-                    window
-                        .emit(
-                            "credentials",
-                            app.state::<Arc<Mutex<UserState>>>()
-                                .lock()
-                                .unwrap()
-                                .credentials
-                                .clone(),
-                        )
-                        .unwrap();
-                    window
-                        .emit(
-                            "traffic",
-                            app.state::<Arc<Mutex<TrafficState>>>()
-                                .lock()
-                                .unwrap()
-                                .traffic
-                                .clone(),
-                        )
-                        .unwrap();
-                    window
-                        .emit(
-                            "traffic_units",
-                            app.state::<Arc<Mutex<TrafficState>>>()
-                                .lock()
-                                .unwrap()
-                                .traffic_units
-                                .clone(),
-                        )
-                        .unwrap();
-                    window.show().unwrap();
-                    window.unminimize().unwrap();
-                    window.set_focus().unwrap();
+                    utils::show_window(app.app_handle());
                 }
                 "logout" => {
-                    let running_state = app.state::<Arc<Mutex<RunningState>>>();
+                    utils::reset_running_state(app.app_handle());
                     let user_state = app.state::<Arc<Mutex<UserState>>>();
-                    running_state.lock().unwrap().login_guard = Option::None;
                     let credentials = user_state.lock().unwrap().credentials.to_owned();
                     let login_endpoint = user_state.lock().unwrap().login_endpoint.to_owned();
                     if networking::user::logout(credentials, login_endpoint).is_ok() {
@@ -374,59 +313,25 @@ fn main() {
                     }
                 }
                 "reconnect" => {
-                    let running_state = app.state::<Arc<Mutex<RunningState>>>();
+                    utils::reset_running_state(app.app_handle());
                     let user_state = app.state::<Arc<Mutex<UserState>>>();
                     let creds = user_state.lock().unwrap().credentials.to_owned();
-                    running_state.lock().unwrap().login_guard = Option::None;
-                    running_state.lock().unwrap().traffic_guard = Option::None;
                     if (creds.username.len() == 0) | (creds.password.len() == 0) {
-                        let window: tauri::Window = app.get_window("main").unwrap();
-                        window.show().unwrap();
+                        utils::show_window(app.app_handle());
                     } else {
                         connect_campnet(app.app_handle(), false);
                         networking::traffic::get_remaining_data(app.app_handle(), false);
                     }
                 }
                 "delete" => {
-                    let running_state = app.state::<Arc<Mutex<RunningState>>>();
-                    running_state.lock().unwrap().login_guard = Option::None;
-                    running_state.lock().unwrap().traffic_guard = Option::None;
+                    utils::reset_running_state(app.app_handle());
                     let user_state = app.state::<Arc<Mutex<UserState>>>();
                     user_state.lock().unwrap().credential_manager.clear();
-                    user_state.lock().unwrap().credentials = Credentials {
-                        username: "".to_owned(),
-                        password: "".to_owned(),
-                    };
+                    user_state.lock().unwrap().credentials = Credentials::default();
                     let traffic_state = app.state::<Arc<Mutex<TrafficState>>>();
-                    traffic_state.lock().unwrap().traffic = TrafficStats {
-                        total: 0.0,
-                        last: 0.0,
-                        current: 0.0,
-                        used: 0.0,
-                        remaining: 0.0,
-                    };
-                    traffic_state.lock().unwrap().traffic_units = TrafficUnits {
-                        total: "".to_string(),
-                        last: "".to_string(),
-                        current: "".to_string(),
-                        used: "".to_string(),
-                        remaining: "".to_string(),
-                    };
-                    auto_launch_check(app.app_handle());
-                    let window: tauri::Window = app.get_window("main").unwrap();
-                    window
-                        .emit("credentials", user_state.lock().unwrap().credentials.clone())
-                        .unwrap();
-                    window
-                        .emit("traffic", traffic_state.lock().unwrap().traffic.clone())
-                        .unwrap();
-                    window
-                        .emit(
-                            "traffic_units",
-                            traffic_state.lock().unwrap().traffic_units.clone(),
-                        )
-                        .unwrap();
-                    window.show().unwrap();
+                    traffic_state.lock().unwrap().traffic = TrafficStats::default();
+                    traffic_state.lock().unwrap().traffic_units = TrafficUnits::default();
+                    utils::show_window(app.app_handle());
                 }
                 _ => {}
             },
@@ -436,41 +341,7 @@ fn main() {
                 size: _,
                 ..
             } => {
-                auto_launch_check(app.app_handle());
-                let window: tauri::Window = app.get_window("main").unwrap();
-                window
-                    .emit(
-                        "credentials",
-                        app.state::<Arc<Mutex<UserState>>>()
-                            .lock()
-                            .unwrap()
-                            .credentials
-                            .clone(),
-                    )
-                    .unwrap();
-                window
-                    .emit(
-                        "traffic",
-                        app.state::<Arc<Mutex<TrafficState>>>()
-                            .lock()
-                            .unwrap()
-                            .traffic
-                            .clone(),
-                    )
-                    .unwrap();
-                window
-                    .emit(
-                        "traffic_units",
-                        app.state::<Arc<Mutex<TrafficState>>>()
-                            .lock()
-                            .unwrap()
-                            .traffic_units
-                            .clone(),
-                    )
-                    .unwrap();
-                window.show().unwrap();
-                window.unminimize().unwrap();
-                window.set_focus().unwrap();
+                utils::show_window(app.app_handle());
             }
             _ => {}
         })

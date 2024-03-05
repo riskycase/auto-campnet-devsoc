@@ -1,8 +1,9 @@
 extern crate timer;
 
+use tauri::{AppHandle, Manager};
 use timer::Guard;
 
-use crate::{CredentialManager, Credentials, NotificationState, TrafficStats, TrafficUnits};
+use crate::{networking::credentials::CredentialManager, Credentials, NotificationState, TrafficStats, TrafficUnits};
 
 #[derive(Clone)]
 pub struct RunningState {
@@ -10,11 +11,31 @@ pub struct RunningState {
     pub traffic_guard: Option<Guard>,
 }
 
+impl RunningState {
+    pub fn default() -> RunningState {
+        RunningState {
+            login_guard: Option::None,
+            traffic_guard: Option::None,
+        }
+    }
+}
+
 #[derive(Clone)]
 pub struct UserState {
     pub credential_manager: CredentialManager,
     pub login_endpoint: String,
     pub credentials: Credentials,
+}
+
+impl UserState {
+    pub fn default(app: AppHandle, login_endpoint: String) -> UserState {
+        let credential_manager = CredentialManager::new(app.app_handle());
+        UserState {
+            credential_manager: credential_manager.to_owned(),
+            login_endpoint,
+            credentials: Credentials::default(),
+        }
+    }
 }
 
 #[derive(Clone)]
@@ -25,4 +46,17 @@ pub struct TrafficState {
     pub traffic: TrafficStats,
     pub traffic_units: TrafficUnits,
     pub last_notification_state: NotificationState,
+}
+
+impl TrafficState {
+    pub fn default(portal_endpoint: String) -> TrafficState {
+        TrafficState {
+            portal_endpoint,
+            cookie: "".to_string(),
+            csrf: "".to_string(),
+            traffic: TrafficStats::default(),
+            traffic_units: TrafficUnits::default(),
+            last_notification_state: NotificationState::None,
+        }
+    }
 }

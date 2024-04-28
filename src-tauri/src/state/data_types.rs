@@ -3,7 +3,10 @@ extern crate timer;
 use tauri::{AppHandle, Manager};
 use timer::Guard;
 
-use crate::{networking::credentials::CredentialManager, Credentials, NotificationState, TrafficStats, TrafficUnits};
+use crate::{
+    networking::credentials::CredentialManager, Credentials, NotificationState, TrafficStats,
+    TrafficUnits, state::tray::TrayManager
+};
 
 #[derive(Clone)]
 pub struct RunningState {
@@ -46,10 +49,11 @@ pub struct TrafficState {
     pub traffic: TrafficStats,
     pub traffic_units: TrafficUnits,
     pub last_notification_state: NotificationState,
+    pub tray_manager: TrayManager,
 }
 
 impl TrafficState {
-    pub fn default(portal_endpoint: String) -> TrafficState {
+    pub fn default(app: AppHandle, portal_endpoint: String) -> TrafficState {
         TrafficState {
             portal_endpoint,
             cookie: "".to_string(),
@@ -57,6 +61,7 @@ impl TrafficState {
             traffic: TrafficStats::default(),
             traffic_units: TrafficUnits::default(),
             last_notification_state: NotificationState::None,
+            tray_manager: TrayManager::new(app),
         }
     }
 }

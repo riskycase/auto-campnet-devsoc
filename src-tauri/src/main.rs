@@ -7,14 +7,17 @@
 use auto_launch::{AutoLaunch, AutoLaunchBuilder, Error};
 use std::env::current_exe;
 use std::sync::{Arc, Mutex};
-use tauri::{api::notification::Notification, Manager};
+use tauri::Manager;
 extern crate chrono;
 extern crate timer;
 
+mod constants;
+mod interaction;
 mod networking;
 mod state;
 mod utils;
 
+use interaction::notification;
 use networking::data_types::{Credentials, NotificationState, TrafficStats, TrafficUnits};
 use state::data_types::{RunningState, TrafficState, UserState};
 
@@ -38,20 +41,8 @@ fn connect_campnet(app: tauri::AppHandle, initial_run: bool) {
     if !initial_run {
         let running_state = app.state::<Arc<Mutex<RunningState>>>();
         running_state.lock().unwrap().login_guard = Option::None;
-        let tray_handle = app.tray_handle();
-        let resources_resolver = app.path_resolver();
-        let active_icon_path = resources_resolver
-            .resolve_resource("resources/icons/active.png")
-            .unwrap();
-        let used_50_icon_path = resources_resolver
-            .resolve_resource("resources/icons/used_50.png")
-            .unwrap();
-        let used_90_icon_path = resources_resolver
-            .resolve_resource("resources/icons/used_90.png")
-            .unwrap();
-        let inactive_icon_path = resources_resolver
-            .resolve_resource("resources/icons/inactive.png")
-            .unwrap();
+        let traffic_state = app.state::<Arc<Mutex<TrafficState>>>();
+        let tray_manager = &traffic_state.lock().unwrap().tray_manager;
         let user_state = app.state::<Arc<Mutex<UserState>>>();
         let credentials = user_state.lock().unwrap().credentials.to_owned();
         let client = reqwest::blocking::Client::new();
@@ -66,28 +57,17 @@ fn connect_campnet(app: tauri::AppHandle, initial_run: bool) {
                     user_state.lock().unwrap().login_endpoint.to_string(),
                 );
                 if res.is_ok() {
-                    let traffic_state = app.state::<Arc<Mutex<TrafficState>>>();
                     let res_body: String = res.unwrap().text().unwrap();
                     if res_body.contains("LIVE") {
-                        Notification::new("com.riskycase.autocampnet")
-                            .title("Connected to Campnet!")
-                            .body("Logged in successfully to BPGC network")
-                            .show()
-                            .unwrap();
+                        notification::notify_logged_in();
                         let current_notification_state =
                             traffic_state.lock().unwrap().last_notification_state;
                         if current_notification_state == NotificationState::None {
-                            tray_handle
-                                .set_icon(tauri::Icon::File(active_icon_path))
-                                .unwrap();
+                            tray_manager.set_active_icon();
                         } else if current_notification_state == NotificationState::Used50 {
-                            tray_handle
-                                .set_icon(tauri::Icon::File(used_50_icon_path))
-                                .unwrap();
+                            tray_manager.set_used_50_icon();
                         } else if current_notification_state == NotificationState::Used90 {
-                            tray_handle
-                                .set_icon(tauri::Icon::File(used_90_icon_path))
-                                .unwrap();
+                            tray_manager.set_used_90_icon();
                         }
                         let app_handle_next = app.app_handle();
                         let callback_timer = timer::Timer::new();
@@ -101,32 +81,14 @@ fn connect_campnet(app: tauri::AppHandle, initial_run: bool) {
                             Option::Some(callback_gaurd.to_owned());
                         std::thread::sleep(std::time::Duration::from_secs(3));
                     } else if res_body.contains("failed") {
-                        Notification::new("com.riskycase.autocampnet")
-                            .title("Could not connect to Campnet!")
-                            .body("Incorrect credentials were provided")
-                            .show()
-                            .unwrap();
-                        tray_handle
-                            .set_icon(tauri::Icon::File(inactive_icon_path))
-                            .unwrap();
+                        notification::notify_incorrect_creds();
+                        tray_manager.set_inactive_icon();
                     } else if res_body.contains("exceeded") {
-                        Notification::new("com.riskycase.autocampnet")
-                            .title("Could not connect to Campnet!")
-                            .body("Daily data limit exceeded on credentials")
-                            .show()
-                            .unwrap();
-                        tray_handle
-                            .set_icon(tauri::Icon::File(inactive_icon_path))
-                            .unwrap();
+                        notification::notify_limit_exceeded();
+                        tray_manager.set_inactive_icon();
                     } else {
-                        Notification::new("com.riskycase.autocampnet")
-                            .title("Could not to Campnet!")
-                            .body("There was an issue with the login attempt")
-                            .show()
-                            .unwrap();
-                        tray_handle
-                            .set_icon(tauri::Icon::File(inactive_icon_path))
-                            .unwrap();
+                        notification::notify_failure_generic();
+                        tray_manager.set_inactive_icon();
                     }
                 }
             } else {
@@ -139,9 +101,7 @@ fn connect_campnet(app: tauri::AppHandle, initial_run: bool) {
                     },
                 );
                 running_state.lock().unwrap().login_guard = Option::Some(callback_gaurd.to_owned());
-                tray_handle
-                    .set_icon(tauri::Icon::File(active_icon_path))
-                    .unwrap();
+                tray_manager.set_active_icon();
                 std::thread::sleep(std::time::Duration::from_secs(3));
             }
         }
@@ -170,7 +130,10 @@ fn main() {
     let system_tray = tauri::SystemTray::new().with_menu(tray_menu);
     tauri::Builder::default()
         .setup(|app: &mut tauri::App| {
-            app.manage(Arc::new(Mutex::new(TrafficState::default("https://campnet.bits-goa.ac.in:4443".to_string()))));
+            app.manage(Arc::new(Mutex::new(TrafficState::default(
+                app.app_handle(),
+                "https://campnet.bits-goa.ac.in:4443".to_string(),
+            ))));
             app.manage(Arc::new(Mutex::new(UserState::default(
                 app.app_handle(),
                 "https://campnet.bits-goa.ac.in:8090".to_string(),
@@ -188,11 +151,7 @@ fn main() {
                     connect_campnet(app_handle_thread.app_handle(), false);
                     networking::traffic::get_remaining_data(app_handle_thread.app_handle(), false);
                 });
-                Notification::new("com.riskycase.autocampnet")
-                    .title("Credentials saved to disk")
-                    .body("App will try to login to campnet whenever available")
-                    .show()
-                    .unwrap();
+                notification::notify_creds_saved();
             });
             let app_handle_minimise = app.app_handle();
             app.listen_global("minimise", move |_event: tauri::Event| {
@@ -294,22 +253,12 @@ fn main() {
                     let credentials = user_state.lock().unwrap().credentials.to_owned();
                     let login_endpoint = user_state.lock().unwrap().login_endpoint.to_owned();
                     if networking::user::logout(credentials, login_endpoint).is_ok() {
-                        app.tray_handle()
-                            .set_icon(tauri::Icon::File(
-                                app.path_resolver()
-                                    .resolve_resource("resources/icons/inactive.png")
-                                    .unwrap(),
-                            ))
-                            .unwrap();
-                        Notification::new("com.riskycase.autocampnet")
-                            .title("Logged out of campnet!")
-                            .show()
-                            .unwrap();
+                        let traffic_state = app.state::<Arc<Mutex<TrafficState>>>();
+                        let tray_manager = &traffic_state.lock().unwrap().tray_manager;
+                        tray_manager.set_inactive_icon();
+                        notification::notify_logged_out();
                     } else {
-                        Notification::new("com.riskycase.autocampnet")
-                            .title("Unable to logout of campnet!")
-                            .show()
-                            .unwrap();
+                        notification::notify_logout_error();
                     }
                 }
                 "reconnect" => {
@@ -331,6 +280,9 @@ fn main() {
                     let traffic_state = app.state::<Arc<Mutex<TrafficState>>>();
                     traffic_state.lock().unwrap().traffic = TrafficStats::default();
                     traffic_state.lock().unwrap().traffic_units = TrafficUnits::default();
+                    let traffic_state = app.state::<Arc<Mutex<TrafficState>>>();
+                    let tray_manager = &traffic_state.lock().unwrap().tray_manager;
+                    tray_manager.set_inactive_icon();
                     utils::show_window(app.app_handle());
                 }
                 _ => {}

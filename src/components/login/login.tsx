@@ -5,7 +5,7 @@ import {
     Tag,
     Toggle,
 } from "@cred/neopop-web/lib/components";
-import { StateUpdater, useEffect, useState } from "preact/hooks";
+import { Dispatch, StateUpdater, useEffect, useState } from "preact/hooks";
 import { emit } from "@tauri-apps/api/event";
 
 import styles from "./login.module.scss";
@@ -18,10 +18,10 @@ export function Login(props: {
         username: string;
         password: string;
     };
-    setCredentials: StateUpdater<{
+    setCredentials: Dispatch<StateUpdater<{
         username: string;
         password: string;
-    }>;
+    }>>;
     logo: string;
     autolaunch: boolean;
 }) {

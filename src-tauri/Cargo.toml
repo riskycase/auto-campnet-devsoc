@@ -1,6 +1,6 @@
 [package]
 name = "app"
-version = "2.0.1"
+version = "2.1.0"
 description = "Connect to BITS Goa campus network automatically"
 authors = ["Hrishikesh Patil <hrishikeshpatil.754@gmail.com>"]
 license = "MIT"
@@ -12,18 +12,18 @@ rust-version = "1.57"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [build-dependencies]
-tauri-build = { version = "1.2.1", features = [] }
+tauri-build = { version = "1.5.1", features = [] }
 
 [dependencies]
 serde_json = "1.0.88"
 serde = { version = "1.0.147", features = ["derive"] }
-tauri = { version = "1.2.1", features = ["fs-create-dir", "fs-read-dir", "fs-read-file", "fs-remove-file", "fs-write-file", "icon-png", "notification", "system-tray", "window-hide", "window-show", "window-start-dragging"] }
+tauri = { version = "1.6.2", features = ["fs-create-dir", "fs-read-dir", "fs-read-file", "fs-remove-file", "fs-write-file", "icon-png", "notification", "system-tray", "window-hide", "window-show", "window-start-dragging"] }
 timer = "0.2.0"
 chrono = "0.4.23"
-reqwest = { version = "0.11.13", features = ["blocking"] }
+reqwest = { version = "0.12.4", features = ["blocking"] }
 regex = "1.7.1"
 tl = "0.7.7"
-auto-launch = "0.4.0"
+auto-launch = "0.5.0"
 
 [features]
 # by default Tauri runs in production mode

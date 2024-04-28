@@ -145,7 +145,7 @@ fn main() {
             app.listen_global("save", move |event: tauri::Event| {
                 let user_state = app_handle_save.state::<Arc<Mutex<UserState>>>();
                 let creds: Credentials = serde_json::from_str(event.payload().unwrap()).unwrap();
-                user_state.lock().unwrap().credential_manager.save(creds);
+                user_state.lock().unwrap().credential_manager.save(creds).unwrap();
                 let app_handle_thread = app_handle_save.app_handle();
                 std::thread::spawn(move || {
                     connect_campnet(app_handle_thread.app_handle(), false);
@@ -275,7 +275,7 @@ fn main() {
                 "delete" => {
                     utils::reset_running_state(app.app_handle());
                     let user_state = app.state::<Arc<Mutex<UserState>>>();
-                    user_state.lock().unwrap().credential_manager.clear();
+                    user_state.lock().unwrap().credential_manager.clear().unwrap();
                     user_state.lock().unwrap().credentials = Credentials::default();
                     let traffic_state = app.state::<Arc<Mutex<TrafficState>>>();
                     traffic_state.lock().unwrap().traffic = TrafficStats::default();
